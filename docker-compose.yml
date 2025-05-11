@@ -1,0 +1,22 @@
+version: "3.8"
+
+services:
+  gmail:
+    image: python:3.11-slim
+    ports:
+      - "8000:3000"
+
+    working_dir: /src
+    command: bash -c "pip install -e . && python /src/src/mcp_server_headless_gmail/server.py --http-transport=True"
+    privileged: true
+    restart: always
+    tty: true
+    network_mode: host
+    volumes:
+      - ./:/src
+      - ./gcp-oauth.keys.json:/gcp-oauth.keys.json
+    environment:
+      GMAIL_OAUTH_PATH: /gcp-oauth.keys.json
+      GMAIL_CREDENTIALS_PATH: /gmail-server/credentials.json
+volumes:
+  mcp-gmail:

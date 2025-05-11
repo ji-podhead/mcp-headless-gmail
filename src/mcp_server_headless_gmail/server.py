@@ -4,7 +4,10 @@ import os
 from dotenv import load_dotenv
 from mcp.server.models import InitializationOptions
 import mcp.types as types
+from mcp.server.streamable_http import streamable_http_server
 from mcp.server import NotificationOptions, Server
+from mcp.server.fastmcp import FastMCP
+
 import mcp.server.stdio
 from pydantic import AnyUrl
 import json
@@ -59,7 +62,6 @@ class GmailClient:
             client_id=client_id,
             client_secret=client_secret,
         )
-        
         # Build the Gmail service if access token is provided
         if access_token:
             self.service = build('gmail', 'v1', credentials=self.credentials, cache_discovery=False)
@@ -452,11 +454,11 @@ class GmailClient:
             logger.error(f"Exception in get_email_body_chunk: {str(e)}", exc_info=True)
             return json.dumps({"error": str(e)})
 
-async def main():
+async def main(http_transport):
     """Run the Gmail MCP server."""
     logger.info("Gmail server starting")
     server = Server("gmail-client")
-
+    fastAgentServer = FastMCP("headless-gmail")
     @server.list_resources()
     async def handle_list_resources() -> list[types.Resource]:
         return []
@@ -468,7 +470,7 @@ async def main():
 
         path = str(uri).replace("gmail://", "")
         return ""
-
+    @fastAgentServer.list_resources()
     @server.list_tools()
     async def handle_list_tools() -> list[types.Tool]:
         """List available tools"""
@@ -531,6 +533,7 @@ async def main():
             ),
         ]
 
+    @fastAgentServer.call_tool()
     @server.call_tool()
     async def handle_call_tool(
         name: str, arguments: dict[str, Any] | None
@@ -628,23 +631,38 @@ async def main():
         except Exception as e:
             return [types.TextContent(type="text", text=f"Error: {str(e)}")]
 
-    async with mcp.server.stdio.stdio_server() as (read_stream, write_stream):
-        logger.info("Server running with stdio transport")
-        await server.run(
-            read_stream,
-            write_stream,
-            InitializationOptions(
-                server_name="gmail",
-                server_version="0.1.0",
-                capabilities=server.get_capabilities(
-                    notification_options=NotificationOptions(),
-                    experimental_capabilities={},
+
+    if(http_transport is False):
+        async with mcp.server.stdio.stdio_server() as (read_stream, write_stream):
+            logger.info("Server running with stdio transport")
+            await server.run(
+                read_stream,
+                write_stream,
+                InitializationOptions(
+                    server_name="gmail",
+                    server_version="0.1.0",
+                    capabilities=server.get_capabilities(
+                        notification_options=NotificationOptions(),
+                        experimental_capabilities={},
+                    ),
                 ),
-            ),
-        )
+            )
+    else:
+        # Run server with streamable_http transport
+        fastAgentServer.run(transport="streamable-http")
+        logger.info("Server running with streamable-http transport")
+        
+        
 
 if __name__ == "__main__":
     import asyncio
-    
-    # Simplified command-line with no OAuth parameters
-    asyncio.run(main()) 
+    import argparse
+
+    parser = argparse.ArgumentParser(description="Run the Gmail MCP server.")
+    parser.add_argument(
+        "--http-transport",
+        action="store_true",
+        help="Use HTTP transport instead of stdio",
+    )
+    args = parser.parse_args()
+    asyncio.run(main( args.http_transport))
